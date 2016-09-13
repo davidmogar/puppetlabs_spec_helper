@@ -61,6 +61,21 @@ Host github.com
 
 Note: parallel downloads is only available for repositories and not forge modules.
 
+### Parallel tests
+It is also possible to use the `parallel_tests` Gem via the `:parallel_spec` Rake task to run rspec commands in parallel on groups of spec files.
+
+Use of parallelization at this level can result in large performance benefits when the Rspec examples tend to cause a number of large, CPU-intensive catalog compilations to occur.  An example of where this might be the case is in a complex module with a lot of tests or a control repo with many hosts.
+
+Be aware however that in other circumstances this parallelization can result in the tests actually taking longer to run.  The best thing to do is time `rspec spec` and `rspec parallel_spec` and use the parallelization only when there is a clear benefit.
+
+To enable this feature, add the `parallel_tests` Gem to your project's Gemfile:
+
+    gem 'parallel_tests'
+
+And then to run spec tests in parallel:
+
+    $ rake parallel_spec
+
 Issues
 ======
 
@@ -93,6 +108,17 @@ branch of this project from github, and install it as a rubygem.
 There should be few or no cases where you would want to have any other
 branch of this project besides master/HEAD.
 
+Running on non-current ruby versions
+------------------------------------
+
+Since gem and bundler, ruby's package management tools, do not take the target ruby version into account when downloading packages, the puppetlabs_spec_helper gem can only depend on gems that are available for all supported ruby versions. If you can/want to use features from other packages, install those additional packages manually, or have a look at the Gemfile, which provides code to specify those dependencies in a more "friendly" way. This currently affects the following gems:
+
+* puppet
+* rubocop
+* rubocop-rspec
+* json_pure
+* rack
+
 Initializing Puppet for Testing
 ===============================
 
@@ -119,9 +145,10 @@ variables for the spec run. These are:
 * ``FUTURE_PARSER`` - set to "yes" to enable the [future parser](http://docs.puppetlabs.com/puppet/latest/reference/experiments_future.html),
   the equivalent of setting [parser=future](http://docs.puppetlabs.com/references/latest/configuration.html#parser)
   in puppet.conf.
-* ``STRICT_VARIABLES`` - set to "yes" to enable strict variable checking,
-  the equivalent of setting [strict_variables](http://docs.puppetlabs.com/references/latest/configuration.html#strictvariables)=true
-  in puppet.conf.
+* ``STRICT_VARIABLES`` - set to "yes" to enable set to strict variable checking when using Puppet versions between 3.5 and 4.0;
+  set to "no" to disable strict variable checking on Puppet versions 4.0, and later.
+  See [strict_variables](http://docs.puppetlabs.com/references/latest/configuration.html#strictvariables)
+  in puppet.conf for details.
 * ``ORDERING`` - set to the desired ordering method ("title-hash", "manifest", or "random")
   to set the order of unrelated resources when applying a catalog. Leave unset for the default
   behavior, currently "random". This is equivalent to setting [ordering](http://docs.puppetlabs.com/references/latest/configuration.html#ordering)
@@ -170,25 +197,29 @@ Using Fixtures
 `puppetlabs_spec_helper` has the ability to populate the
 `spec/fixtures/modules` directory with dependent modules when `rake spec` or
 `rake spec_prep` is run. To do so, all required modules should be listed in a
-file named `.fixtures.yml` in the root of the project.
+file named `.fixtures.yml` in the root of the project. You can specify a alternate location for that file in the `FIXTURES_YML` environment variable.
 
 When specifying the repo source of the fixture you have a few options as to which revision of the codebase you wish to use.
 
  * repo - the url to the repo
  * scm - options include git or hg. This is an optional step as the helper code will figure out which scm is used.
+
    ```yaml
    scm: git
    scm: hg
    ```
+
  * target - the directory name to clone the repo into ie. `target: mymodule`  defaults to the repo name  (Optional)
  * subdir - directory to be removed from the cloned repo. Its contents will be moved to the root directory (Optional)
  * ref - used to specify the tag name like version hash of commit (Optional)
+
    ```yaml
    ref: 1.0.0
    ref: 880fca52c
    ```
  * branch - used to specify the branch name you want to use ie. `branch: development`
  * flags - additional flags passed to the module installer (both puppet and scm)
+
    ```yaml
    flags: --verbose
    ```
@@ -200,30 +231,43 @@ Fixtures Examples
 Basic fixtures that will symlink `spec/fixtures/modules/my_modules` to the
 project root:
 
-    fixtures:
-      symlinks:
-        my_module: "#{source_dir}"
+```yaml
+fixtures:
+  symlinks:
+    my_module: "#{source_dir}"
+```
 
+This is the same as specifying no symlinks fixtures at all.
 
 Add `firewall` and `stdlib` as required module fixtures:
 
-    fixtures:
-      repositories:
-        firewall: "git://github.com/puppetlabs/puppetlabs-firewall"
-        stdlib: "git://github.com/puppetlabs/puppetlabs-stdlib"
-      symlinks:
-        my_module: "#{source_dir}"
+```yaml
+fixtures:
+  repositories:
+    firewall: "git://github.com/puppetlabs/puppetlabs-firewall"
+    stdlib: "git://github.com/puppetlabs/puppetlabs-stdlib"
+```
 
 Specify that the git tag `2.4.2` of `stdlib' should be checked out:
 
-    fixtures:
-      repositories:
-        firewall: "git://github.com/puppetlabs/puppetlabs-firewall"
-        stdlib:
-          repo: "git://github.com/puppetlabs/puppetlabs-stdlib"
-          ref: "2.6.0"
-      symlinks:
-        my_module: "#{source_dir}"
+```yaml
+fixtures:
+  repositories:
+    firewall: "git://github.com/puppetlabs/puppetlabs-firewall"
+    stdlib:
+      repo: "git://github.com/puppetlabs/puppetlabs-stdlib"
+      ref: "2.6.0"
+```
+
+Move manifests and siblings to root directory when they are inside a `code` directory:
+
+```yaml
+fixtures:
+  repositories:
+    stdlib:
+      repo: "git://github.com/puppetlabs/puppetlabs-extradirectory"
+      subdir: "code"
+```
 
 Move manifests and siblings to root directory when they are inside a `code` directory:
 
@@ -235,54 +279,36 @@ Move manifests and siblings to root directory when they are inside a `code` dire
         
 Install modules from Puppet Forge:
 
-    fixtures:
-      forge_modules:
-        firewall: "puppetlabs/firewall"
-        stdlib:
-          repo: "puppetlabs/stdlib"
-          ref: "2.6.0"
+```yaml
+fixtures:
+  forge_modules:
+    firewall: "puppetlabs/firewall"
+    stdlib:
+      repo: "puppetlabs/stdlib"
+      ref: "2.6.0"
+```
 
 Pass additional flags to module installation:
 
-    fixtures:
-      forge_modules:
-        stdlib:
-          repo: "puppetlabs/stdlib"
-          ref: "2.6.0"
-          flags: "--module_repository https://my_repo.com"
-        repositories:
-          firewall:
-            repo: "git://github.com/puppetlabs/puppetlabs-firewall"
-            ref: "2.6.0"
-            flags: "--verbose"
+```yaml
+fixtures:
+  forge_modules:
+    stdlib:
+      repo: "puppetlabs/stdlib"
+      ref: "2.6.0"
+      flags: "--module_repository https://my_repo.com"
+    repositories:
+      firewall:
+        repo: "git://github.com/puppetlabs/puppetlabs-firewall"
+        ref: "2.6.0"
+        flags: "--verbose"
+```
 
 Testing Parser Functions
 ========================
 
-This library provides a consistent way to create a Puppet::Parser::Scope object
-suitable for use in a testing harness with the intent of testing the expected
-behavior of parser functions distributed in modules.
-
-Previously, modules would do something like this:
-
-    describe "split()" do
-      let(:scope) { Puppet::Parser::Scope.new }
-      it "should split 'one;two' on ';' into [ 'one', 'two' ]" do
-        scope.function_split(['one;two', ';']).should == [ 'one', 'two' ]
-      end
-    end
-
-This will not work beyond Puppet 2.7 as we have changed the behavior of the
-scope initializer in Puppet 3.0.  Modules should instead initialize scope
-instances in a manner decoupled from the internal behavior of Puppet:
-
-    require 'puppetlabs_spec_helper/puppetlabs_spec/puppet_internals'
-    describe "split()" do
-      let(:scope) { PuppetlabsSpec::PuppetInternals.scope }
-      it "should split 'one;two' on ';' into [ 'one', 'two' ]" do
-        scope.function_split(['one;two', ';']).should == [ 'one', 'two' ]
-      end
-    end
+This whole section is superseded by improved support of accessing the scope in
+rspec-puppet.
 
 Generating code coverage reports
 ================================

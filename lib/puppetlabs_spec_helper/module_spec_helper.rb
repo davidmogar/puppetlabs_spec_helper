@@ -8,7 +8,7 @@ end
 
 def verify_contents(subject, title, expected_lines)
   content = subject.resource('file', title).send(:parameters)[:content]
-  expect(content.split("\n") & expected_lines).to eql expected_lines
+  expect(content.split("\n") & expected_lines).to match_array expected_lines.uniq
 end
 
 spec_path = File.expand_path(File.join(Dir.pwd, 'spec'))
@@ -32,7 +32,7 @@ RSpec.configure do |c|
       Puppet.settings[:stringify_facts] = false if ENV['STRINGIFY_FACTS'] == 'no'
       Puppet.settings[:trusted_node_data] = true if ENV['TRUSTED_NODE_DATA'] == 'yes'
     end
-    Puppet.settings[:strict_variables] = true if ENV['STRICT_VARIABLES'] == 'yes'
+    Puppet.settings[:strict_variables] = true if ENV['STRICT_VARIABLES'] == 'yes' || (Puppet.version.to_f >= 4.0 && ENV['STRICT_VARIABLES'] != 'no')
     Puppet.settings[:ordering] = ENV['ORDERING'] if ENV['ORDERING']
   end
 end

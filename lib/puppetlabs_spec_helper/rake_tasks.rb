@@ -1,7 +1,6 @@
 require 'fileutils'
 require 'rake'
 require 'rspec/core/rake_task'
-require 'rubocop/rake_task'
 require 'tmpdir'
 require 'yaml'
 
@@ -14,11 +13,12 @@ end
 
 task :default => [:help]
 
+pattern = 'spec/{aliases,classes,defines,unit,functions,hosts,integration,types}/**/*_spec.rb'
+
 desc "Run spec tests on an existing fixtures directory"
 RSpec::Core::RakeTask.new(:spec_standalone) do |t|
   t.rspec_opts = ['--color']
 
-  pattern = 'spec/{classes,defines,unit,functions,hosts,integration,types}/**/*_spec.rb'
   if ENV['CI_NODE_TOTAL'] && ENV['CI_NODE_INDEX']
     ci_total = ENV['CI_NODE_TOTAL'].to_i
     ci_index = ENV['CI_NODE_INDEX'].to_i
@@ -90,6 +90,10 @@ def vagrant_ssh(set, node = nil)
   end
 end
 
+def auto_symlink
+  { Dir.pwd.split('/').last.split('-').last => '#{source_dir}' }
+end
+
 def fixtures(category)
   if File.exists?('.fixtures.yml')
     fixtures_yaml = '.fixtures.yml'
@@ -100,11 +104,15 @@ def fixtures(category)
   end
 
   begin
-    fixtures = YAML.load_file(fixtures_yaml)["fixtures"]
+    fixtures = YAML.load_file(ENV['FIXTURES_YML'] || fixtures_yaml)["fixtures"]
   rescue Errno::ENOENT
-    return {}
+    fixtures = {}
   rescue Psych::SyntaxError => e
     abort("Found malformed YAML in #{fixtures_yaml} on line #{e.line} column #{e.column}: #{e.problem}")
+  end
+
+  if fixtures['symlinks'].nil?
+    fixtures['symlinks'] = auto_symlink
   end
 
   result = {}
@@ -248,7 +256,7 @@ task :spec_prep do
       opts[:thread] = Thread.new do
         clone_repo(scm, remote, target, subdir, ref, branch, flags)
         revision(scm, target, ref) if ref
-	remove_subdirectory(target, subdir) if subdir
+        remove_subdirectory(target, subdir) if subdir
       end
     else
       # the last thread started should be the longest wait
@@ -338,6 +346,22 @@ task :spec do
   Rake::Task[:spec_clean].invoke
 end
 
+desc "Parallel spec tests"
+task :parallel_spec do
+  begin
+    require 'parallel_tests'
+
+    args = ['-t', 'rspec'].
+      concat(Rake::FileList[pattern].to_a)
+
+    Rake::Task[:spec_prep].invoke
+    ParallelTests::CLI.new.run(args)
+    Rake::Task[:spec_clean].invoke
+  rescue LoadError
+    fail 'Add the parallel_tests gem to Gemfile to enable this task'
+  end
+end
+
 desc "List available beaker nodesets"
 task 'beaker:sets' do
   beaker_node_sets.each do |set|
@@ -387,8 +411,6 @@ task :clean do
   FileUtils.rm_rf("pkg/")
 end
 
-RuboCop::RakeTask.new
-
 require 'puppet-lint/tasks/puppet-lint'
 # Must clear as it will not override the existing puppet-lint rake task since we require to import for
 # the PuppetLint::RakeTask
@@ -399,11 +421,19 @@ PuppetLint::RakeTask.new(:lint) do |config|
   config.fail_on_warnings = true
   config.disable_checks = [
     '80chars',
+    '140chars',
     'class_inherits_from_params_class',
     'class_parameter_defaults',
     'documentation',
     'single_quote_string_with_variables']
-  config.ignore_paths = ["tests/**/*.pp", "vendor/**/*.pp","examples/**/*.pp", "spec/**/*.pp", "pkg/**/*.pp"]
+  config.ignore_paths = [
+    "bundle/**/*.pp",
+    "pkg/**/*.pp",
+    "spec/**/*.pp",
+    "tests/**/*.pp",
+    "types/**/*.pp",
+    "vendor/**/*.pp",
+  ]
 end
 
 require 'puppet-syntax/tasks/puppet-syntax'
@@ -411,6 +441,9 @@ PuppetSyntax.exclude_paths ||= []
 PuppetSyntax.exclude_paths << "spec/fixtures/**/*"
 PuppetSyntax.exclude_paths << "pkg/**/*"
 PuppetSyntax.exclude_paths << "vendor/**/*"
+if Puppet.version.to_f < 4.0
+  PuppetSyntax.exclude_paths << "types/**/*"
+end
 PuppetSyntax.future_parser = true if ENV['FUTURE_PARSER'] == 'yes'
 
 desc "Check syntax of Ruby files and call :syntax and :metadata_lint"
@@ -465,7 +498,7 @@ task :compute_dev_version do
   print new_version
 end
 
-desc "Runs all nessesary checks on a module in preparation for a release"
+desc "Runs all necessary checks on a module in preparation for a release"
 task :release_checks do
   Rake::Task[:lint].invoke
   Rake::Task[:validate].invoke
@@ -520,4 +553,17 @@ end
 desc "Display the list of available rake tasks"
 task :help do
   system("rake -T")
+end
+
+begin
+  require 'rubocop/rake_task'
+  RuboCop::RakeTask.new(:rubocop) do |task|
+    # These make the rubocop experience maybe slightly less terrible
+    task.options = ['-D', '-S', '-E']
+  end
+rescue LoadError
+  desc "rubocop is not available in this installation"
+  task :rubocop do
+    fail "rubocop is not available in this installation"
+  end
 end
